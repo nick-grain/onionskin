@@ -31,6 +31,8 @@ Retina screenshots display at 1:1 screen scale.
 | ⌘`-` | Zoom out 10% |
 | ⌘`0` | Reset zoom |
 | Esc / Delete | Clear image |
+| ⌘Z | Undo |
+| ⌘⇧Z / Ctrl+Y | Redo |
 | ⌘Q | Quit |
 
 Opacity can also be set from the Opacity menu.

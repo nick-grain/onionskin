@@ -14,7 +14,15 @@ app.whenReady().then(() => {
 
   const menu = Menu.buildFromTemplate([
     { role: 'appMenu' },
-    { role: 'editMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => win.webContents.send('undo') },
+        { label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', click: () => win.webContents.send('redo') },
+        { type: 'separator' },
+        { role: 'paste' },
+      ],
+    },
     {
       label: 'Opacity',
       submenu: [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map((p) => ({
@@ -35,7 +43,12 @@ app.whenReady().then(() => {
     menu.getMenuItemById(`opacity-${Math.round(opacity * 100)}`).checked = true;
   };
 
+  win.on('move', () => win.webContents.send('pos', ...win.getPosition()));
+
+  ipcMain.on('get-pos', (e) => { e.returnValue = win.getPosition(); });
+  ipcMain.on('set-pos', (_e, x, y) => win.setPosition(x, y));
   ipcMain.on('opacity-step', (_e, dir) => setOpacity(opacity + dir * 0.1));
+  ipcMain.on('opacity-set', (_e, v) => setOpacity(v));
   ipcMain.on('resize', (_e, w, h) => win.setContentSize(w, h));
   ipcMain.on('nudge', (_e, dx, dy) => {
     const [x, y] = win.getPosition();

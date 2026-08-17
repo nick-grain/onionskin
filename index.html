@@ -1,6 +1,6 @@
-<body style="margin:0; overflow:hidden; background:transparent; -webkit-app-region:drag; font:14px sans-serif">
+<body style="margin:0; overflow:hidden; background:transparent; font:14px sans-serif; user-select:none">
   <div id="hint" style="margin:10px; padding:14px; background:rgba(30,30,30,.9); color:#eee; border-radius:10px; text-align:center; box-shadow:0 0 0 1px rgba(255,255,255,.25), 0 2px 12px rgba(0,0,0,.5)">Drag me, then paste an image (&#8984;V)</div>
-  <img id="img" style="display:none; opacity:.5">
+  <img id="img" draggable="false" style="display:none; opacity:.5">
   <script>
     const { ipcRenderer } = require('electron');
     const img = document.getElementById('img');
@@ -10,20 +10,91 @@
     const MINUS_KEYS = ['-', '_'];
     const CLEAR_KEYS = ['Escape', 'Backspace', 'Delete'];
     const NUDGE_KEYS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+    const SETTLE_MS = 500;
 
     let baseW = 0;
     let baseH = 0;
     let zoom = 1;
+    let opacity = 0.5;
+    let [x, y] = ipcRenderer.sendSync('get-pos');
 
-    function apply() {
-      if (!baseW) return;
-      const w = Math.round(baseW * zoom);
-      const h = Math.round(baseH * zoom);
-      img.style.width = w + 'px';
-      ipcRenderer.send('resize', w, h);
+    function snapshot() {
+      return { src: img.getAttribute('src'), baseW, baseH, zoom, opacity, x, y };
     }
 
-    ipcRenderer.on('opacity', (_e, v) => { img.style.opacity = v; });
+    let present = snapshot();
+    const undoStack = [];
+    const redoStack = [];
+    let settleTimer;
+
+    function commit() {
+      clearTimeout(settleTimer);
+      const snap = snapshot();
+      if (JSON.stringify(snap) === JSON.stringify(present)) return;
+      undoStack.push(present);
+      redoStack.length = 0;
+      present = snap;
+    }
+
+    function scheduleCommit() {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(commit, SETTLE_MS);
+    }
+
+    function render() {
+      if (img.getAttribute('src')) {
+        const w = Math.round(baseW * zoom);
+        const h = Math.round(baseH * zoom);
+        img.style.width = w + 'px';
+        img.style.display = 'block';
+        hint.hidden = true;
+        ipcRenderer.send('resize', w, h);
+      } else {
+        img.style.display = 'none';
+        hint.hidden = false;
+        ipcRenderer.send('resize', 400, 100);
+      }
+    }
+
+    function restore(s) {
+      img.onload = null;
+      if (s.src) img.src = s.src;
+      else img.removeAttribute('src');
+      ({ baseW, baseH, zoom, opacity, x, y } = s);
+      img.style.opacity = opacity;
+      ipcRenderer.send('opacity-set', opacity);
+      ipcRenderer.send('set-pos', x, y);
+      render();
+    }
+
+    function undo() {
+      commit();
+      if (!undoStack.length) return;
+      redoStack.push(present);
+      present = undoStack.pop();
+      restore(present);
+    }
+
+    function redo() {
+      commit();
+      if (!redoStack.length) return;
+      undoStack.push(present);
+      present = redoStack.pop();
+      restore(present);
+    }
+
+    ipcRenderer.on('undo', undo);
+    ipcRenderer.on('redo', redo);
+    ipcRenderer.on('opacity', (_e, v) => {
+      opacity = v;
+      img.style.opacity = v;
+      scheduleCommit();
+    });
+    ipcRenderer.on('pos', (_e, nx, ny) => {
+      x = nx;
+      y = ny;
+      scheduleCommit();
+    });
 
     document.addEventListener('paste', async (e) => {
       const file = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))?.getAsFile();
@@ -38,42 +109,70 @@
           }
         }
       }
+      commit();
       img.onload = () => {
         baseW = img.naturalWidth / scale;
         baseH = img.naturalHeight / scale;
         zoom = 1;
-        img.style.display = 'block';
-        hint.hidden = true;
-        apply();
+        render();
+        commit();
       };
       img.src = URL.createObjectURL(file);
     });
 
+    let drag = null;
+
+    document.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const [wx, wy] = ipcRenderer.sendSync('get-pos');
+      drag = { wx, wy, sx: e.screenX, sy: e.screenY };
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!drag) return;
+      x = drag.wx + e.screenX - drag.sx;
+      y = drag.wy + e.screenY - drag.sy;
+      ipcRenderer.send('set-pos', x, y);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!drag) return;
+      drag = null;
+      commit();
+    });
+
     document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        redo();
+        return;
+      }
       if (PLUS_KEYS.includes(e.key) || MINUS_KEYS.includes(e.key)) {
         const dir = PLUS_KEYS.includes(e.key) ? 1 : -1;
         if (e.metaKey || e.ctrlKey) {
           zoom = Math.min(10, Math.max(0.1, zoom + dir * 0.1));
-          apply();
+          render();
+          scheduleCommit();
         } else {
           ipcRenderer.send('opacity-step', dir);
         }
       }
       if (e.key === '0' && (e.metaKey || e.ctrlKey)) {
         zoom = 1;
-        apply();
+        render();
+        scheduleCommit();
       }
       if (NUDGE_KEYS[e.key]) {
         const step = e.shiftKey ? 10 : 1;
         ipcRenderer.send('nudge', NUDGE_KEYS[e.key][0] * step, NUDGE_KEYS[e.key][1] * step);
       }
       if (CLEAR_KEYS.includes(e.key)) {
-        img.style.display = 'none';
+        commit();
+        img.onload = null;
         img.removeAttribute('src');
-        hint.hidden = false;
         baseW = baseH = 0;
         zoom = 1;
-        ipcRenderer.send('resize', 400, 100);
+        render();
+        commit();
       }
     });
   </script>
