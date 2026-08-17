@@ -27,6 +27,9 @@ Retina screenshots display at 1:1 screen scale.
 | Shift+Arrows | Nudge window 10px |
 | `=` / `+` | Increase opacity 10% |
 | `-` / `_` | Decrease opacity 10% |
+| ⌘`+` | Zoom in 10% |
+| ⌘`-` | Zoom out 10% |
+| ⌘`0` | Reset zoom |
 | Esc / Delete | Clear image |
 | ⌘Q | Quit |
 
