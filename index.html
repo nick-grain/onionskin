@@ -1,0 +1,57 @@
+<body style="margin:0; overflow:hidden; background:transparent; -webkit-app-region:drag; font:14px sans-serif">
+  <div id="hint" style="margin:10px; padding:14px; background:rgba(30,30,30,.9); color:#eee; border-radius:10px; text-align:center; box-shadow:0 0 0 1px rgba(255,255,255,.25), 0 2px 12px rgba(0,0,0,.5)">Drag me, then paste an image (&#8984;V)</div>
+  <img id="img" style="display:none; opacity:.5">
+  <script>
+    const { ipcRenderer } = require('electron');
+    const img = document.getElementById('img');
+    const hint = document.getElementById('hint');
+
+    ipcRenderer.on('opacity', (_e, v) => { img.style.opacity = v; });
+
+    document.addEventListener('paste', async (e) => {
+      const file = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))?.getAsFile();
+      if (!file) return;
+      // ponytail: retina screenshots are 2x pixels; PNG pHYs chunk carries the DPI, divide back to screen points
+      let scale = 1;
+      if (file.type === 'image/png') {
+        const b = new DataView(await file.arrayBuffer());
+        for (let i = 8; i + 12 <= b.byteLength; i += b.getUint32(i) + 12) {
+          if (b.getUint32(i + 4) === 0x70485973) {
+            scale = Math.max(1, Math.round(b.getUint32(i + 8) * 0.0254 / 72));
+            break;
+          }
+        }
+      }
+      img.onload = () => {
+        const w = Math.round(img.naturalWidth / scale);
+        const h = Math.round(img.naturalHeight / scale);
+        img.style.width = w + 'px';
+        img.style.display = 'block';
+        hint.hidden = true;
+        ipcRenderer.send('resize', w, h);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    const OPACITY_UP_KEYS = ['=', '+'];
+    const OPACITY_DOWN_KEYS = ['-', '_'];
+    const CLEAR_KEYS = ['Escape', 'Backspace', 'Delete'];
+    const NUDGE_KEYS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+
+    document.addEventListener('keydown', (e) => {
+      if (OPACITY_UP_KEYS.includes(e.key) || OPACITY_DOWN_KEYS.includes(e.key)) {
+        ipcRenderer.send('opacity-step', OPACITY_UP_KEYS.includes(e.key) ? 1 : -1);
+      }
+      if (NUDGE_KEYS[e.key]) {
+        const step = e.shiftKey ? 10 : 1;
+        ipcRenderer.send('nudge', NUDGE_KEYS[e.key][0] * step, NUDGE_KEYS[e.key][1] * step);
+      }
+      if (CLEAR_KEYS.includes(e.key)) {
+        img.style.display = 'none';
+        img.removeAttribute('src');
+        hint.hidden = false;
+        ipcRenderer.send('resize', 400, 100);
+      }
+    });
+  </script>
+</body>
