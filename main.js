@@ -7,6 +7,7 @@ app.whenReady().then(() => {
     transparent: true,
     alwaysOnTop: true,
     frame: false,
+    resizable: false,
     hasShadow: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
