@@ -166,6 +166,10 @@
         ipcRenderer.send('nudge', NUDGE_KEYS[e.key][0] * step, NUDGE_KEYS[e.key][1] * step);
       }
       if (CLEAR_KEYS.includes(e.key)) {
+        if (e.key === 'Escape' && !img.getAttribute('src')) {
+          ipcRenderer.send('hide');
+          return;
+        }
         commit();
         img.onload = null;
         img.removeAttribute('src');

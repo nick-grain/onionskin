@@ -1,4 +1,11 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const path = require('path');
+const HOTKEY = 'Command+Control+Shift+Space';
+const { app, BrowserWindow, ipcMain, Menu, Tray, globalShortcut } = require('electron');
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
 
 app.whenReady().then(() => {
   const win = new BrowserWindow({
@@ -11,7 +18,7 @@ app.whenReady().then(() => {
     hasShadow: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
-  win.loadFile('index.html');
+  win.loadFile(path.join(__dirname, 'index.html'));
 
   const menu = Menu.buildFromTemplate([
     { role: 'appMenu' },
@@ -46,6 +53,41 @@ app.whenReady().then(() => {
 
   win.on('move', () => win.webContents.send('pos', ...win.getPosition()));
 
+  win.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  app.on('before-quit', () => { app.isQuitting = true; });
+
+  const toggle = () => {
+    if (win.isVisible()) {
+      win.hide();
+      return;
+    }
+    win.show();
+    app.focus({ steal: true });
+  };
+  const tray = new Tray(path.join(__dirname, 'iconTemplate.png'));
+  tray.setToolTip('onionskin');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show/Hide', accelerator: HOTKEY, click: () => toggle() },
+    { type: 'separator' },
+    { role: 'quit' },
+  ]));
+
+  app.on('second-instance', () => {
+    win.show();
+    app.focus({ steal: true });
+  });
+
+  if (!globalShortcut.register(HOTKEY, toggle)) {
+    require('electron').dialog.showErrorBox('onionskin', `Could not register ${HOTKEY}. Another app already owns it.`);
+  }
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+
+  ipcMain.on('hide', () => win.hide());
   ipcMain.on('get-pos', (e) => { e.returnValue = win.getPosition(); });
   ipcMain.on('set-pos', (_e, x, y) => win.setPosition(x, y));
   ipcMain.on('opacity-step', (_e, dir) => setOpacity(opacity + dir * 0.1));
